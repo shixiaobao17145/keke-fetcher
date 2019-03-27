@@ -1,9 +1,10 @@
 const cheerio = require('cheerio');
 const fs = require('fs');
+const iconv = require('iconv-lite');
 
 let { fetchWebPageContent, logger, promisor } = require('./util')
 let baseUrl = 'http://www.kekenet.com/kouyu/primary/new900/jichu/';
-let saveToFileName = './data/new900_jichu.json';
+let saveToFileName = './data/new900_jichu3.json';
 
 function fetchListPageUrls(baseUrl) {
     logger.log('start to fetching:' + baseUrl);
@@ -47,7 +48,7 @@ function getAllTargetContent(allArticlePageUrls) {
         return parseInt(id1)>parseInt(id2)?1:-1;
     });
     logger.log(`start to get content from all the page urls, urls count is ${allArticlePageUrls.length}`);
-    return Promise.all(allArticlePageUrls.map(articleUrl=>getTargetContentInPage(articleUrl))).then(contents=>{
+    return Promise.all(allArticlePageUrls.map(articleUrl=>getTargetContentInPage2(articleUrl))).then(contents=>{
         logger.log(`all articles content fetching are done, result length: ${contents.length}`);
         return contents.reduce((allArr,arr)=>allArr.concat(arr),[]);
     });
@@ -79,6 +80,58 @@ function getTargetContentInPage(articleUrl) {
             return result;
         }, []);
     });
+}
+
+
+function getTargetContentInPage2(articleUrl, truncateTitleCount) {
+    //on article page
+    logger.log(`start to fetch content in article page:${articleUrl}`);
+    return fetchWebPageContent(articleUrl).then(html => {
+        logger.log(`content fetching is done in article page ${articleUrl}`);
+        let $ = cheerio.load(html);
+        let scripts = $('script:not([src])');
+        console.log('scripts', scripts);
+        let str = scripts.map((i,item)=>item.children[0]).filter((i,item)=>(item && item.data.indexOf('thunder_url')>-1)).map((i,item)=>item.data).toArray().join('');
+        console.log('str',str);
+        let thunder_url_matched = str.match(/thunder_url\s*=\s*["'](.*)["']/);
+        
+        let contents = [];
+        if(thunder_url_matched && thunder_url_matched[1]){
+            let thunder_url = thunder_url_matched[1];
+            let lrc_url_matched = str.match(/=(http.*\+\s*thunder_url\s*\+\s*['"]\.lrc['"])/);
+            if(lrc_url_matched && lrc_url_matched[1]){
+                let lrc_url = lrc_url_matched[1];
+                lrc_url = lrc_url.replace('thunder_url',thunder_url).replace(/['"\+]/g,'');
+                return fetchWebPageContent(lrc_url,{isRtnRaw:true}).then(rawBuffers=>{
+                    let lrcContent = iconv.decode(Buffer.concat(rawBuffers),'gbk')
+                    console.log(lrcContent);
+                    let contents = lrcContentToABCards(lrcContent,2);
+                    console.log(contents);
+                    return contents;
+                });
+            }
+        }
+    });
+}
+
+
+function lrcContentToABCards(lrcContent, truncateTitleCount){
+    let matched = lrcContent.match(/\[\d+:\d+\.\d+\].*\r*\n.*/g);
+    matched = matched.map(i=>{
+        let [_,en, zh] = i.match(/\[\d+:\d+\.\d+\](.*)\r*\n(.*)/);
+        return {en, zh};
+    });
+    let titles = matched.splice(0, truncateTitleCount);
+    return [{
+        titles,
+        contents:matched
+    }]; 
+}
+
+//getTargetContentInPage2('http://www.kekenet.com/kouyu/200901/17097.shtml');
+module.exports = {
+    fetchContent:getTargetContentInPage2,
+    lrcContentToABCards
 }
 
 let p = fetchListPageUrls(baseUrl).then(urls=>getAllArticlPageUrls(urls)).then(urls=>getAllTargetContent(urls));

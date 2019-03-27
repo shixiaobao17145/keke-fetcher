@@ -16,13 +16,16 @@ let promisor = function (fn) {
         }
     });
 }
-function readableToString(res) {
+function readableToString(res, isRtnRaw = false) {
     return new Promise((rs, rj) => {
-        res.setEncoding('utf8');
-        let rawData = '';
-        res.on('data', (chunk) => { rawData += chunk; });
+        let rawData = [];
+        res.on('data', (chunk) => { rawData.push(chunk); });
         res.on('end', () => {
-            rs(rawData);
+            if(isRtnRaw){
+                rs(rawData);
+            }else{
+                rs(rawData.map(i=>i.toString('utf8')).join(''));
+            }
         });
         res.on('error', (err) => rj(err));
     });
@@ -72,6 +75,6 @@ const logger = {
 module.exports = {
     promisor,
     fetchWebPage,
-    fetchWebPageContent: url => fetchWebPage(url).then(res => readableToString(res)),
+    fetchWebPageContent: (url, opts={}) => fetchWebPage(url).then(res => readableToString(res, opts.isRtnRaw)),
     logger
 }
